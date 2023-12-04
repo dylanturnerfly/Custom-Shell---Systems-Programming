@@ -15,9 +15,9 @@ char** parseCommand(char* cmd);
 int isRedirection(char** tokens);
 void setupRedirection(char** tokens);
 void findFullPath(char* command, char* fullPath);
-void builtin_cd(char** args);
-void builtin_pwd(char** args);
-void builtin_which(char** args);
+int builtin_cd(char** args);
+int builtin_pwd(char** args);
+int builtin_which(char** args);
 char** expandWildcards(char** tokens, int* tokenCount);
 char*** splitCommandAtPipe(char** args, int* cmdCount);
 int executeCommand(char* cmd, int lastExitStatus);
@@ -40,7 +40,7 @@ void interactiveMode() {
 
     printf("Welcome to my shell!\n");
     while (1) {
-        printf("mysh> ");
+        printf("\nmysh> ");
         fflush(stdout);
 
         // Clear the input buffer
@@ -65,23 +65,26 @@ void interactiveMode() {
 }
 
 void batchMode(char* scriptPath) {
-    int fd = open(scriptPath, O_RDONLY);
-    if (fd == -1) {
+    FILE *file = fopen(scriptPath, "r");
+    if (!file) {
         perror("Error opening file");
         exit(EXIT_FAILURE);
     }
 
-    char buffer[BUFFER_SIZE];
-    ssize_t bytes_read;
+    char line[BUFFER_SIZE];
     int lastExitStatus = 0;
 
-    while ((bytes_read = read(fd, buffer, BUFFER_SIZE - 1)) > 0) {
-        buffer[bytes_read] = '\0';
-        lastExitStatus = executeCommand(buffer, lastExitStatus);
+    while (fgets(line, BUFFER_SIZE, file) != NULL) {
+        // Remove newline character if present
+        line[strcspn(line, "\n")] = '\0';
+        
+        // Execute each command
+        lastExitStatus = executeCommand(line, lastExitStatus);
     }
 
-    close(fd);
+    fclose(file);
 }
+
 
 
 char** parseCommand(char* cmd) {
@@ -166,60 +169,85 @@ void setupRedirection(char** tokens) {
 }
 
 void findFullPath(char *command, char *fullPath) {
-    char *paths[] = {"/usr/local/bin/", "/usr/bin/", "/bin/"};
     struct stat statbuf;
 
+    // Check if command starts with a slash (absolute path) or contains a slash (relative path)
     if (strchr(command, '/') != NULL) {
-        // Command already has a path
-        strcpy(fullPath, command);
-        return;
-    }
-
-    for (int i = 0; i < 3; ++i) {
-        strcpy(fullPath, paths[i]);
-        strcat(fullPath, command);
-        if (access(fullPath, X_OK) == 0 && stat(fullPath, &statbuf) == 0 && S_ISREG(statbuf.st_mode)) {
-            // Executable file found
+        if (access(command, X_OK) == 0 && stat(command, &statbuf) == 0 && S_ISREG(statbuf.st_mode)) {
+            strcpy(fullPath, command);
+            return;
+        } else {
+            fullPath[0] = '\0'; // Command not found or not executable
             return;
         }
     }
 
-    // Command not found in the specified directories
-    fullPath[0] = '\0';
+    // If no slash is found, search in the specified directories
+    char *searchPaths[] = {"/usr/local/bin", "/usr/bin", "/bin"};
+    int numPaths = 3;
+
+    for (int i = 0; i < numPaths; i++) {
+        snprintf(fullPath, BUFFER_SIZE, "%s/%s", searchPaths[i], command);
+
+        if (access(fullPath, X_OK) == 0 && stat(fullPath, &statbuf) == 0 && S_ISREG(statbuf.st_mode)) {
+            return; // Executable file found
+        }
+    }
+
+    fullPath[0] = '\0'; // Command not found
 }
 
-void builtin_cd(char **args) {
+
+
+
+
+
+
+
+
+int builtin_cd(char **args) {
     if (args[1] == NULL) {
-        fprintf(stderr, "mysh: expected argument to \"cd\"\n");
+        fprintf(stderr, "cd: expected argument to \"cd\"\n");
+        return 1; // Return failure status
     } else {
         if (chdir(args[1]) != 0) {
-            perror("mysh");
+            perror("cd");
+            return 1; // Return failure status
         }
+        return 0; // Return success status
     }
 }
 
-void builtin_pwd(char **args) {
+
+int builtin_pwd(char **args) {
     char cwd[BUFFER_SIZE];
     if (getcwd(cwd, sizeof(cwd)) != NULL) {
         printf("%s\n", cwd);
+        return 0; // Return success status
     } else {
-        perror("mysh");
+        perror("pwd");
+        return 1; // Return failure status
     }
 }
 
-void builtin_which(char **args) {
+
+int builtin_which(char **args) {
     if (args[1] == NULL) {
-        fprintf(stderr, "mysh: expected argument to \"which\"\n");
+        fprintf(stderr, "which: expected argument to \"which\"\n");
+        return 1; // Return failure status
     } else {
         char fullPath[BUFFER_SIZE];
         findFullPath(args[1], fullPath);
         if (strlen(fullPath) > 0) {
             printf("%s\n", fullPath);
+            return 0; // Return success status
         } else {
-            printf("mysh: %s: command not found\n", args[1]);
+            printf("which: %s: command not found\n", args[1]);
+            return 1; // Return failure status
         }
     }
 }
+
 
 char** expandWildcards(char **tokens, int *tokenCount) {
     DIR *d;
@@ -307,6 +335,7 @@ char*** splitCommandAtPipe(char **args, int *cmdCount) {
 
 // Tokenize and execute the command
 int executeCommand(char* cmd, int lastExitStatus) {
+    // printf("Last exit status: %d\n", lastExitStatus);
     char** args = parseCommand(cmd);
     int tokenCount = 0;
     while (args[tokenCount] != NULL) tokenCount++;
@@ -316,20 +345,57 @@ int executeCommand(char* cmd, int lastExitStatus) {
         return 0; // An empty command was entered.
     }
 
-    // Directly handle built-in commands
-    if (strcmp(args[0], "cd") == 0) {
-        builtin_cd(args);
-        free(args);
-        return lastExitStatus;
-    } else if (strcmp(args[0], "pwd") == 0) {
-        builtin_pwd(args);
-        free(args);
-        return lastExitStatus;
-    } else if (strcmp(args[0], "which") == 0) {
-        builtin_which(args);
-        free(args);
-        return lastExitStatus;
+    
+     // Handling conditional commands 'then' and 'else'
+    if (strcmp(args[0], "then") == 0) {
+        // Skip if last command failed or 'then' is the only command
+        if (lastExitStatus != 0 || tokenCount == 1) {
+            free(args);
+            return lastExitStatus;
+        }
+        // Shift the command array to bypass 'then'
+        memmove(args, args + 1, (tokenCount - 1) * sizeof(char*));
+        args[tokenCount - 1] = NULL;
+    } else if (strcmp(args[0], "else") == 0) {
+        // Skip if last command succeeded or 'else' is the only command
+        if (lastExitStatus == 0 || tokenCount == 1) {
+            free(args);
+            return lastExitStatus;
+        }
+        // Shift the command array to bypass 'else'
+        memmove(args, args + 1, (tokenCount - 1) * sizeof(char*));
+        args[tokenCount - 1] = NULL;
     }
+
+    // Directly handle built-in commands
+     if (strcmp(args[0], "cd") == 0) {
+        int status = builtin_cd(args);
+        free(args);
+        return status;
+    } else if (strcmp(args[0], "pwd") == 0) {
+        int status = builtin_pwd(args);
+        free(args);
+        return status;
+    } else if (strcmp(args[0], "which") == 0) {
+        int status = builtin_which(args);
+        free(args);
+        return status;
+    } else if (strcmp(args[0], "exit") == 0) {
+        printf("mysh: exiting");
+        free(args);
+        exit(0);
+    } else if (strcmp(args[0], "echo") == 0) {
+        for (int i = 1; args[i] != NULL; i++) {
+            printf("%s", args[i]);
+            if (args[i + 1] != NULL) {
+                printf(" "); // Add a space between words but not after the last word
+            }
+        }
+        printf("\n"); // New line at the end
+        free(args);
+        return 0; // Return success status
+    }
+
 
     // Expand wildcards
     char** expandedArgs = expandWildcards(args, &tokenCount);
@@ -350,6 +416,13 @@ int executeCommand(char* cmd, int lastExitStatus) {
             }
             char fullPath[BUFFER_SIZE];
             findFullPath(expandedArgs[0], fullPath);
+
+            // Debugging output before calling execv
+            // printf("Executing command: %s\n", fullPath);
+            // for (int i = 0; expandedArgs[i] != NULL; ++i) {
+            //     printf("Arg[%d]: %s\n", i, expandedArgs[i]);
+            // }
+
             if (strlen(fullPath) > 0) {
                 execv(fullPath, expandedArgs);
                 perror("execv");
@@ -410,6 +483,5 @@ int executeCommand(char* cmd, int lastExitStatus) {
     free(args);
     free(expandedArgs);
     free(cmdGroups);
-
     return WEXITSTATUS(status);
 }

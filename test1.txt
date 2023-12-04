@@ -1,3 +1,0 @@
-pwd
-pwd < dummy.txt
-pwd > dummy.txt
