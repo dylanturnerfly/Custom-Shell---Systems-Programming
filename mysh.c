@@ -335,7 +335,6 @@ char*** splitCommandAtPipe(char **args, int *cmdCount) {
 
 // Tokenize and execute the command
 int executeCommand(char* cmd, int lastExitStatus) {
-    // printf("Last exit status: %d\n", lastExitStatus);
     char** args = parseCommand(cmd);
     int tokenCount = 0;
     while (args[tokenCount] != NULL) tokenCount++;
@@ -345,30 +344,25 @@ int executeCommand(char* cmd, int lastExitStatus) {
         return 0; // An empty command was entered.
     }
 
-    
-     // Handling conditional commands 'then' and 'else'
+    // Handling conditional commands 'then' and 'else'
     if (strcmp(args[0], "then") == 0) {
-        // Skip if last command failed or 'then' is the only command
         if (lastExitStatus != 0 || tokenCount == 1) {
             free(args);
             return lastExitStatus;
         }
-        // Shift the command array to bypass 'then'
         memmove(args, args + 1, (tokenCount - 1) * sizeof(char*));
         args[tokenCount - 1] = NULL;
     } else if (strcmp(args[0], "else") == 0) {
-        // Skip if last command succeeded or 'else' is the only command
         if (lastExitStatus == 0 || tokenCount == 1) {
             free(args);
             return lastExitStatus;
         }
-        // Shift the command array to bypass 'else'
         memmove(args, args + 1, (tokenCount - 1) * sizeof(char*));
         args[tokenCount - 1] = NULL;
     }
 
-    // Directly handle built-in commands
-     if (strcmp(args[0], "cd") == 0) {
+    // Built-in commands
+    if (strcmp(args[0], "cd") == 0) {
         int status = builtin_cd(args);
         free(args);
         return status;
@@ -381,59 +375,54 @@ int executeCommand(char* cmd, int lastExitStatus) {
         free(args);
         return status;
     } else if (strcmp(args[0], "exit") == 0) {
-        printf("mysh: exiting");
+        printf("mysh: exiting\n");
         free(args);
         exit(0);
-    } else if (strcmp(args[0], "echo") == 0) {
-        for (int i = 1; args[i] != NULL; i++) {
-            printf("%s", args[i]);
-            if (args[i + 1] != NULL) {
-                printf(" "); // Add a space between words but not after the last word
-            }
-        }
-        printf("\n"); // New line at the end
-        free(args);
-        return 0; // Return success status
     }
-
 
     // Expand wildcards
     char** expandedArgs = expandWildcards(args, &tokenCount);
 
+    // Check for redirection and pipes
     int cmdCount = 0;
     char*** cmdGroups = splitCommandAtPipe(expandedArgs, &cmdCount);
 
     int status = 0;
 
     if (cmdCount == 1) {
-        // No pipes, execute command normally
+        // Execute command normally
         int pid = fork();
-
         if (pid == 0) {
-            // Child process
+            // Handle redirection
             if (isRedirection(expandedArgs)) {
                 setupRedirection(expandedArgs);
             }
-            char fullPath[BUFFER_SIZE];
-            findFullPath(expandedArgs[0], fullPath);
 
-            // Debugging output before calling execv
-            // printf("Executing command: %s\n", fullPath);
-            // for (int i = 0; expandedArgs[i] != NULL; ++i) {
-            //     printf("Arg[%d]: %s\n", i, expandedArgs[i]);
-            // }
-
-            if (strlen(fullPath) > 0) {
-                execv(fullPath, expandedArgs);
-                perror("execv");
-                exit(EXIT_FAILURE);
+            if (strcmp(expandedArgs[0], "echo") == 0) {
+                // Handle 'echo' as a built-in command
+                for (int i = 1; expandedArgs[i] != NULL; i++) {
+                    printf("%s", expandedArgs[i]);
+                    if (expandedArgs[i + 1] != NULL) {
+                        printf(" ");
+                    }
+                }
+                printf("\n");
+                exit(0);
             } else {
-                perror("execv");
-                exit(EXIT_FAILURE);
+                // Execute external command
+                char fullPath[BUFFER_SIZE];
+                findFullPath(expandedArgs[0], fullPath);
+                if (strlen(fullPath) > 0) {
+                    execv(fullPath, expandedArgs);
+                    perror("execv");
+                    exit(EXIT_FAILURE);
+                } else {
+                    perror("execv");
+                    exit(EXIT_FAILURE);
+                }
             }
         } else if (pid > 0) {
-            // Parent process
-            waitpid(pid, &status, 0); // Wait for child process to finish
+            waitpid(pid, &status, 0); // Wait for child process
         } else {
             perror("fork");
         }
