@@ -1,9 +1,3 @@
 pwd
 pwd < dummy.txt
 pwd > dummy.txt
-cd ./..
-cd
-cd < dummy.txt
-cd > dummy.txt
-cd ..
-cd ./../Assignment-1/memgrind

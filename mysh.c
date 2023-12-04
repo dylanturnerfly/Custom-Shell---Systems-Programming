@@ -306,8 +306,6 @@ char*** splitCommandAtPipe(char **args, int *cmdCount) {
 
 
 // Tokenize and execute the command
-// Handle built-in commands or fork and exec for external commands
-// Manage redirection and pipes
 int executeCommand(char* cmd, int lastExitStatus) {
     char** args = parseCommand(cmd);
     int tokenCount = 0;
@@ -318,19 +316,19 @@ int executeCommand(char* cmd, int lastExitStatus) {
         return 0; // An empty command was entered.
     }
 
-    // Handling conditional commands
-    if (strcmp(args[0], "then") == 0) {
-        if (lastExitStatus != 0) {
-            free(args);
-            return lastExitStatus; // Skip if last command failed
-        }
-        args++; // Move past the 'then'
-    } else if (strcmp(args[0], "else") == 0) {
-        if (lastExitStatus == 0) {
-            free(args);
-            return lastExitStatus; // Skip if last command succeeded
-        }
-        args++; // Move past the 'else'
+    // Directly handle built-in commands
+    if (strcmp(args[0], "cd") == 0) {
+        builtin_cd(args);
+        free(args);
+        return lastExitStatus;
+    } else if (strcmp(args[0], "pwd") == 0) {
+        builtin_pwd(args);
+        free(args);
+        return lastExitStatus;
+    } else if (strcmp(args[0], "which") == 0) {
+        builtin_which(args);
+        free(args);
+        return lastExitStatus;
     }
 
     // Expand wildcards
@@ -341,80 +339,74 @@ int executeCommand(char* cmd, int lastExitStatus) {
 
     int status = 0;
 
+    if (cmdCount == 1) {
+        // No pipes, execute command normally
+        int pid = fork();
 
-// Check for built-in commands
-    if (strcmp(args[0], "cd") == 0) {
-        builtin_cd(args);
-    } else if (strcmp(args[0], "pwd") == 0) {
-        builtin_pwd(args);
-    } else if (strcmp(args[0], "which") == 0) {
-        builtin_which(args);
+        if (pid == 0) {
+            // Child process
+            if (isRedirection(expandedArgs)) {
+                setupRedirection(expandedArgs);
+            }
+            char fullPath[BUFFER_SIZE];
+            findFullPath(expandedArgs[0], fullPath);
+            if (strlen(fullPath) > 0) {
+                execv(fullPath, expandedArgs);
+                perror("execv");
+                exit(EXIT_FAILURE);
+            } else {
+                perror("execv");
+                exit(EXIT_FAILURE);
+            }
+        } else if (pid > 0) {
+            // Parent process
+            waitpid(pid, &status, 0); // Wait for child process to finish
+        } else {
+            perror("fork");
+        }
     } else {
-        if (cmdCount == 1) {
-            // No pipes, execute command normally
+        // Handle pipeline
+        int fds[2];
+        if (pipe(fds) == -1) {
+            perror("pipe");
+            exit(EXIT_FAILURE);
+        }
+
+        for (int i = 0; i < cmdCount; i++) {
             int pid = fork();
+            if (pid == -1) {
+                perror("fork");
+                exit(EXIT_FAILURE);
+            }
 
             if (pid == 0) {
-                // Child process
-                if (isRedirection(expandedArgs)) {
-                    setupRedirection(expandedArgs);
+                if (i == 0) { // First command
+                    close(fds[0]);
+                    dup2(fds[1], STDOUT_FILENO);
+                } else { // Second command
+                    close(fds[1]);
+                    dup2(fds[0], STDIN_FILENO);
                 }
+
+                // Execute the command
                 char fullPath[BUFFER_SIZE];
-                findFullPath(expandedArgs[0], fullPath);
+                findFullPath(cmdGroups[i][0], fullPath);
                 if (strlen(fullPath) > 0) {
-                    execv(fullPath, expandedArgs);
+                    execv(fullPath, cmdGroups[i]);
                 }
                 perror("execv");
                 exit(EXIT_FAILURE);
-            } else if (pid > 0) {
-                // Parent process
-                waitpid(pid, &status, 0); // Wait for child process to finish
-            } else {
-                perror("fork");
-            }
-        } else {
-            // Handle pipeline
-            int fds[2];
-            if (pipe(fds) == -1) {
-                perror("pipe");
-                exit(EXIT_FAILURE);
-            }
-
-            for (int i = 0; i < cmdCount; i++) {
-                int pid = fork();
-                if (pid == -1) {
-                    perror("fork");
-                    exit(EXIT_FAILURE);
-                }
-
-                if (pid == 0) {
-                    if (i == 0) { // First command
-                        close(fds[0]);
-                        dup2(fds[1], STDOUT_FILENO);
-                    } else { // Second command
-                        close(fds[1]);
-                        dup2(fds[0], STDIN_FILENO);
-                    }
-
-                    // Execute the command
-                    char fullPath[BUFFER_SIZE];
-                    findFullPath(cmdGroups[i][0], fullPath);
-                    if (strlen(fullPath) > 0) {
-                        execv(fullPath, cmdGroups[i]);
-                    }
-                    perror("execv");
-                    exit(EXIT_FAILURE);
-                }
-            }
-
-            close(fds[0]);
-            close(fds[1]);
-
-            for (int i = 0; i < cmdCount; i++) {
-                wait(NULL); // Wait for all child processes
             }
         }
+
+        close(fds[0]);
+        close(fds[1]);
+
+        for (int i = 0; i < cmdCount; i++) {
+            wait(NULL); // Wait for all child processes
+        }
     }
+
     free(args);
     free(expandedArgs);
     free(cmdGroups);
