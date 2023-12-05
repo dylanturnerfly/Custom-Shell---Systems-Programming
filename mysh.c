@@ -470,12 +470,12 @@ int executeCommand(char* cmd, int lastExitStatus) {
 
 
 // Print the command and arguments for debugging
-    printf("Executing command: %s\n", args[0]);
-    printf("With arguments: ");
-    for (int i = 1; args[i] != NULL; i++) {
-        printf("'%s' ", args[i]);
-    }
-    printf("\n");
+    // printf("Executing command: %s\n", args[0]);
+    // printf("With arguments: ");
+    // for (int i = 1; args[i] != NULL; i++) {
+    //     printf("'%s' ", args[i]);
+    // }
+    // printf("\n");
 
     // Handling conditional commands 'then' and 'else'
     if (strcmp(args[0], "then") == 0) {
