@@ -120,8 +120,7 @@ char** parseCommand(char* cmd) {
     return tokens;
 }
 
-// This implementation does not handle error cases where redirection operators are used incorrectly (e.g., missing file names, multiple redirections without proper handling). You may need to add additional logic to handle these cases appropriately.
-// Also, this function does not handle appending redirection >>. If needed, you can add similar logic to detect and handle it.
+
 int isRedirection(char** tokens) {
     int i = 0;
     while (tokens[i] != NULL) {
@@ -309,29 +308,138 @@ char** expandWildcards(char **tokens, int *tokenCount) {
 char*** splitCommandAtPipe(char **args, int *cmdCount) {
     int bufferSize = 64;
     char ***cmdGroups = malloc(bufferSize * sizeof(char**));
+    if (!cmdGroups) {
+        perror("malloc");
+        exit(EXIT_FAILURE);
+    }
+
     int groupCount = 0;
-    int i = 0;
+    int start = 0;  // Start index of a command group
+    int argsLength = 0; // Calculate the length of args
 
-    cmdGroups[groupCount] = &args[i];
-    groupCount++;
+    // First, find the length of args
+    while (args[argsLength] != NULL) {
+        argsLength++;
+    }
 
-    while (args[i] != NULL) {
+    for (int i = 0; i < argsLength; i++) {
         if (strcmp(args[i], "|") == 0) {
-            args[i] = NULL; // Split the command here
+            if (i == start) {  // Empty command before the pipe
+                fprintf(stderr, "Syntax error: empty command before pipe\n");
+                free(cmdGroups);
+                *cmdCount = 0;
+                return NULL;
+            }
+
+            args[i] = NULL;  // Null-terminate the current command group
+            cmdGroups[groupCount++] = &args[start];
+
+            start = i + 1;  // Start index for the next command group
+
             if (groupCount >= bufferSize) {
                 bufferSize += 64;
                 cmdGroups = realloc(cmdGroups, bufferSize * sizeof(char**));
+                if (!cmdGroups) {
+                    perror("realloc");
+                    exit(EXIT_FAILURE);
+                }
             }
-            cmdGroups[groupCount] = &args[i + 1];
-            groupCount++;
         }
-        i++;
+    }
+
+    // Check if there is a command after the last pipe
+    if (start < argsLength) {
+        if (args[start] == NULL) {  // Empty command after the last pipe
+            fprintf(stderr, "Syntax error: empty command after pipe\n");
+            free(cmdGroups);
+            *cmdCount = 0;
+            return NULL;
+        }
+        cmdGroups[groupCount++] = &args[start];
     }
 
     *cmdCount = groupCount;
     return cmdGroups;
 }
 
+
+
+
+// Function to execute a single command with redirection
+int executeSingleCommand(char** args) {
+    pid_t pid;
+    int status;
+
+    if ((pid = fork()) == 0) {  // Child process
+        // Handle redirection
+        setupRedirection(args);
+
+        execvp(args[0], args);  // Execute the command
+        perror("execvp");       // execvp failed
+        exit(EXIT_FAILURE);
+    } else if (pid < 0) {
+        perror("fork");  // Fork failed
+        return 1;
+    } else {
+        waitpid(pid, &status, 0);  // Parent waits for child
+        return WEXITSTATUS(status);
+    }
+}
+
+// Function to execute piped commands
+int executePipedCommand(char*** cmdGroups, int cmdCount) {
+    int in_fd = 0, fd[2];
+    pid_t pid;
+    int status = 0;
+
+    for (int i = 0; i < cmdCount; ++i) {
+        // Setup pipe for all but the last command
+        if (i < cmdCount - 1) {
+            if (pipe(fd) < 0) {
+                perror("pipe");
+                return 1;
+            }
+        }
+
+        if ((pid = fork()) == 0) {  // Child process
+            // Handle redirection
+            setupRedirection(cmdGroups[i]);
+
+            if (i != cmdCount - 1) {  // Not the last command
+                dup2(fd[1], STDOUT_FILENO);
+                close(fd[1]);
+            }
+
+            if (i != 0) {  // Not the first command
+                dup2(in_fd, STDIN_FILENO);
+                close(in_fd);
+            }
+
+            execvp(cmdGroups[i][0], cmdGroups[i]);
+            perror("execvp");
+            exit(EXIT_FAILURE);
+        } else if (pid < 0) {
+            perror("fork");
+            return 1;
+        }
+
+        // Close the write end of the pipe in the parent
+        if (i < cmdCount - 1) {
+            close(fd[1]);
+        }
+
+        // Close the previous input file descriptor
+        if (i != 0) {
+            close(in_fd);
+        }
+
+        in_fd = fd[0];  // Save the read end of the pipe
+
+        waitpid(pid, &status, 0);  // Parent waits for child
+    }
+
+    return WEXITSTATUS(status);
+}
 
 // Tokenize and execute the command
 int executeCommand(char* cmd, int lastExitStatus) {
@@ -389,88 +497,18 @@ int executeCommand(char* cmd, int lastExitStatus) {
 
     int status = 0;
 
+    if (cmdCount == 0) {  // Syntax error detected
+        return -1;  // Return an error status
+    }
+
     if (cmdCount == 1) {
-        // Execute command normally
-        int pid = fork();
-        if (pid == 0) {
-            // Handle redirection
-            if (isRedirection(expandedArgs)) {
-                setupRedirection(expandedArgs);
-            }
-
-            if (strcmp(expandedArgs[0], "echo") == 0) {
-                // Handle 'echo' as a built-in command
-                for (int i = 1; expandedArgs[i] != NULL; i++) {
-                    printf("%s", expandedArgs[i]);
-                    if (expandedArgs[i + 1] != NULL) {
-                        printf(" ");
-                    }
-                }
-                printf("\n");
-                exit(0);
-            } else {
-                // Execute external command
-                char fullPath[BUFFER_SIZE];
-                findFullPath(expandedArgs[0], fullPath);
-                if (strlen(fullPath) > 0) {
-                    execv(fullPath, expandedArgs);
-                    perror("execv");
-                    exit(EXIT_FAILURE);
-                } else {
-                    perror("execv");
-                    exit(EXIT_FAILURE);
-                }
-            }
-        } else if (pid > 0) {
-            waitpid(pid, &status, 0); // Wait for child process
-        } else {
-            perror("fork");
-        }
+        status = executeSingleCommand(expandedArgs);
     } else {
-        // Handle pipeline
-        int fds[2];
-        if (pipe(fds) == -1) {
-            perror("pipe");
-            exit(EXIT_FAILURE);
-        }
-
-        for (int i = 0; i < cmdCount; i++) {
-            int pid = fork();
-            if (pid == -1) {
-                perror("fork");
-                exit(EXIT_FAILURE);
-            }
-
-            if (pid == 0) {
-                if (i == 0) { // First command
-                    close(fds[0]);
-                    dup2(fds[1], STDOUT_FILENO);
-                } else { // Second command
-                    close(fds[1]);
-                    dup2(fds[0], STDIN_FILENO);
-                }
-
-                // Execute the command
-                char fullPath[BUFFER_SIZE];
-                findFullPath(cmdGroups[i][0], fullPath);
-                if (strlen(fullPath) > 0) {
-                    execv(fullPath, cmdGroups[i]);
-                }
-                perror("execv");
-                exit(EXIT_FAILURE);
-            }
-        }
-
-        close(fds[0]);
-        close(fds[1]);
-
-        for (int i = 0; i < cmdCount; i++) {
-            wait(NULL); // Wait for all child processes
-        }
+        status = executePipedCommand(cmdGroups, cmdCount);
     }
 
     free(args);
     free(expandedArgs);
     free(cmdGroups);
-    return WEXITSTATUS(status);
+    return status;
 }

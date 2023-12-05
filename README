@@ -1,0 +1,82 @@
+Dylan Turner 207004235 dpt50
+
+Everything is working on my end to my knowledge, please let me know if you have issues! 
+
+Test Plan:
+----------
+In testing the piping and redirection functionality of a custom shell, I considered several scenarios. Firstly, the ability to handle basic command execution without pipes or redirections. I then moved to more complex cases with output and input redirection, where commands like echo "Test" > file.txt and cat < file.txt were executed. Piping between commands,  like echo "Hello" | tr 'a-z' 'A-Z', was important for testing the ability to transfer output from one command as input to another. To address more intricate usage, i tested combinations of pipes and redirections. For example: echo "Sample Text" > out.txt | cat < out.txt.
+
+Error handling was also important, I tested responses to invalid syntax and commands. Finally, I included tests with built-in commands combined with pipes and redirections. 
+
+Each test was performed by directly inputting commands into the shell and comparing the outcomes with those from the standard shell.
+
+
+Test for Batch Mode:
+--------------------
+1. './mysh myscript.sh'
+   -> Setup: Create a file myscript.sh and add whatever commands you want/
+   -> Expected Result: Each command will be executed.
+
+
+Test for Redirections:
+---------------------
+1. 'echo "Hello World" > output.txt'
+   -> Expected Result: A file named output.txt is created with the content "Hello World"
+
+
+2. 'cat < input.txt'
+   -> Setup: Create a file called input.txt and add some content to it.
+   -> Expected Result: The content of input.txt is displayed on the screen.
+
+3. 'echo "New Line" > replace.txt'
+   -> Setup: Create a file replace.txt.
+   -> Expected Result: The "New Line" should be replace the content in replace.txt.
+
+4. 'cat < input.txt > output.txt'
+   -> Setup: Create a file input.txt with content.
+   -> Expected Result: The content of input.txt is copied to output.txt.
+
+5. 'nonexistentcommand > output.txt'
+   -> Expected Result: An error message indicating the command is not found, and output.txt should be created but empty.
+
+6. 'cat < empty.txt'
+   -> Setup:  Create an empty file empty.txt.
+   -> Expected Result: No output (as the file is empty).
+
+7. 'cat < nonexisting.txt'
+   -> Expected Result: An error message indicating the file doesn’t exist.
+
+8. 'cat < input1.txt > output1.txt'
+   'cat < input2.txt > output2.txt'
+   -> Setup: Create input1.txt and input2.txt with different contents
+   -> Expected Result: output1.txt contains the content of input1.txt, and output2.txt contains the content of input2.txt.
+
+9. 'echo "Test" >'
+   -> Expected Result: An error message indicating invalid command syntax.
+
+10. '<' or '>'
+   -> Expected Result: It should give an error saying you didn't provide a valid address to redirect.
+   
+Test for Pipelining:
+--------------------
+
+1. 'echo "Test" | tee output.txt'
+   -> Expected Result: "Test" should be printed to the terminal as well as added to output.txt file.
+
+2. 'echo "Hello, World!" | cat'
+   -> Expected Result: "Hello World" is printed to the console.
+
+3. 'echo "Sample Text" > temp.txt | cat < temp.txt'
+   -> Expected Result: "Sample Text" should be printed to the console.
+
+4. 'ls *.txt | grep [pattern]'
+   -> Expected Result: All the files matching the pattern should be listed.
+
+5. 'cat non_existing_file | sort'
+   -> Expected Result: Should output error for non existing file.
+
+6. 'echo "Sample Text" | tr 'a' 'b''
+   -> Expected Result: This should change all 'a's to 'b's in the output.
+
+7. '|'
+   -> Expected Result: It should give the error: "Syntax error: empty command before pipe"
