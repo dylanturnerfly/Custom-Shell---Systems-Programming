@@ -370,12 +370,19 @@ int executeSingleCommand(char** args) {
     pid_t pid;
     int status;
 
+    char fullPath[BUFFER_SIZE];
+    findFullPath(args[0], fullPath);  // Resolve the full path of the command
+    if (fullPath[0] == '\0') {
+        fprintf(stderr, "%s: command not found\n", args[0]);
+        return 1; // Command not found
+    }
+
     if ((pid = fork()) == 0) {  // Child process
         // Handle redirection
         setupRedirection(args);
 
-        execvp(args[0], args);  // Execute the command
-        perror("execvp");       // execvp failed
+        execv(fullPath, args);  // Execute the command
+        perror("execv");        // execv failed
         exit(EXIT_FAILURE);
     } else if (pid < 0) {
         perror("fork");  // Fork failed
@@ -385,6 +392,7 @@ int executeSingleCommand(char** args) {
         return WEXITSTATUS(status);
     }
 }
+
 
 // Function to execute piped commands
 int executePipedCommand(char*** cmdGroups, int cmdCount) {
@@ -415,8 +423,15 @@ int executePipedCommand(char*** cmdGroups, int cmdCount) {
                 close(in_fd);
             }
 
-            execvp(cmdGroups[i][0], cmdGroups[i]);
-            perror("execvp");
+            char fullPath[BUFFER_SIZE];
+            findFullPath(cmdGroups[i][0], fullPath);  // Resolve the full path
+            if (fullPath[0] == '\0') {
+                fprintf(stderr, "%s: command not found\n", cmdGroups[i][0]);
+                exit(EXIT_FAILURE); // Command not found
+            }
+
+            execv(fullPath, cmdGroups[i]);
+            perror("execv");
             exit(EXIT_FAILURE);
         } else if (pid < 0) {
             perror("fork");
@@ -443,6 +458,7 @@ int executePipedCommand(char*** cmdGroups, int cmdCount) {
 
 // Tokenize and execute the command
 int executeCommand(char* cmd, int lastExitStatus) {
+    
     char** args = parseCommand(cmd);
     int tokenCount = 0;
     while (args[tokenCount] != NULL) tokenCount++;
@@ -451,6 +467,15 @@ int executeCommand(char* cmd, int lastExitStatus) {
         free(args);
         return 0; // An empty command was entered.
     }
+
+
+// Print the command and arguments for debugging
+    printf("Executing command: %s\n", args[0]);
+    printf("With arguments: ");
+    for (int i = 1; args[i] != NULL; i++) {
+        printf("'%s' ", args[i]);
+    }
+    printf("\n");
 
     // Handling conditional commands 'then' and 'else'
     if (strcmp(args[0], "then") == 0) {
